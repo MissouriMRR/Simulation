@@ -14,6 +14,10 @@
 		{
 			"Name": "MultiUserClient",
 			"Enabled": true
+		},
+		{
+			"Name": "AirSim",
+			"Enabled": true
 		}
 	]
 }
