@@ -96,6 +96,9 @@ def translate_coordinates_to_unreal(interop):
         interop['stationaryObstacles'][i]['latitude'] = coordinates_to_unreal(interop['stationaryObstacles'][i]['latitude'])
         interop['stationaryObstacles'][i]['longitude'] = coordinates_to_unreal(interop['stationaryObstacles'][i]['longitude'])
 
+    interop['mapCenterPos']['latitude'] = 0
+    interop['mapCenterPos']['longitude'] = 0
+
 
 def translate_distances_to_unreal(interop):
     for j in range(len(interop['flyZones'])):
