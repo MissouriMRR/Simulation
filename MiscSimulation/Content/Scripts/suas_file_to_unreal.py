@@ -113,6 +113,20 @@ def translate_distances_to_unreal(interop):
         interop['stationaryObstacles'][i]['height'] = feet_to_unreal(interop['stationaryObstacles'][i]['height'])
 
     interop['mapHeight'] = feet_to_unreal(interop['mapHeight'])
+
+
+def convert_interop_file(filename):
+    interop_file = open(filename, "r")
+    interop_string = interop_file.read
+
+    interop = json.loads(interop_string)
+
+    make_coordinates_relative(interop)
+
+    translate_coordinates_to_unreal(interop)
+    translate_distances_to_unreal(interop)
+
+    return json.dumps(interop)
  
 
 if __name__ == "__main__":
