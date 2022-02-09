@@ -13,3 +13,4 @@ Plugins
 *.suo
 *.xcodeproj
 *.xcworkspace
+DefaultEngine.ini
