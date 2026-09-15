@@ -16,12 +16,20 @@ services:
       # hardlink instead of full-copying.
       - UV_PROJECT_ENVIRONMENT=/opt/uv/venv
       - UV_CACHE_DIR=/opt/uv/cache
+      # The project pins Python 3.12, which the image does not ship, so uv downloads its own.
+      # Without this it lands in /root/.local/share/uv/python, which is wiped on recreate and
+      # leaves the venv pointing at a deleted interpreter.
+      - UV_PYTHON_INSTALL_DIR=/opt/uv/python
     volumes:
       # The flight-code repo this container runs against. Defaults to the parent directory,
       # which is correct when this repo is checked out as <flight-code>/simulation.
       - type: bind
         source: ${FLIGHT_CODE_ROOT:-..}
         target: /workspace
+      # Persists /opt/uv (venv, cache, interpreter) across container recreation.
+      - type: volume
+        source: iarc_uv
+        target: /opt/uv
     working_dir: /workspace
     command: bash
     stdin_open: true

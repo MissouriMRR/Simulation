@@ -1,165 +1,102 @@
-import asyncio
+"""
+ProjectAirSim entry point for the SUAS flight code.
+
+Must be run with the env container's system Python, which is the only interpreter there
+that has projectairsim installed:
+    python simulation/interfaces/suas.py
+The flight code is launched as a subprocess via `uv run`, so it still runs in the project's
+own uv environment (which has dronekit but not projectairsim).
+"""
 
 import collections
 import collections.abc
 
-# Add the missing attribute back to the collections module
+# commentjson (a projectairsim dependency) still uses the pre-3.10 collections aliases
 collections.MutableMapping = collections.abc.MutableMapping
 
-from projectairsim import ProjectAirSimClient, Drone, World
-from projectairsim.utils import projectairsim_log
-from projectairsim.image_utils import ImageDisplay
-
-import asyncio
-import multiprocessing as mp
-import time
+import os
+import subprocess
 import sys
+from pathlib import Path
 
-from dronekit import LocationGlobalRelative, VehicleMode, connect
+try:
+    from projectairsim import ProjectAirSimClient, World
+    from projectairsim.utils import projectairsim_log
+except ModuleNotFoundError as err:
+    raise SystemExit(
+        f"projectairsim is not installed for this interpreter ({sys.executable}).\n"
+        "It only exists in the env container's system Python (/usr/local/bin/python).\n"
+        "Run this from the repo root inside the env container:\n"
+        "    python simulation/interfaces/suas.py\n"
+        "Do not use `uv run` here: that selects the project's .venv, which has the\n"
+        "flight dependencies but not projectairsim."
+    ) from err
 
-from ..multidrone_world import MultidroneWorld
+# this file lives at <repo>/simulation/interfaces/suas.py
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SIM_CONFIG_PATH = str(PROJECT_ROOT / "simulation" / "sim_config")
 
-class DronekitDrone:
+# multidrone_world.py sits at the top level of the simulation submodule
+sys.path.insert(0, str(PROJECT_ROOT / "simulation"))
+from multidrone_world import MultidroneWorld
 
-    def __init__(self, connection_string):
-        self._connection_string = connection_string
-        self._drone = None
+EMPTY_SCENE = "scene_ardu_empty.jsonc"
+DRONE_SCENE = "scene_ardu_quadrotor_template.jsonc"
 
-    def connect(self, timeout=30):
-        print("connecting", self._connection_string)
-        vehicle = connect(self._connection_string, wait_ready=True, timeout=timeout)
+# How many drones to spawn. Must match NUM_DRONES on the sim container: every drone needs a
+# SITL behind it, and one that spawns without one softlocks. The SUAS flight code only
+# connects to a single vehicle (udp:127.0.0.1:14550, the first SITL's MAVProxy stream), so
+# anything past the first drone sits in the scene uncontrolled.
+NUM_DRONES = int(os.environ.get("NUM_DRONES", "1"))
 
-        # Get some vehicle attributes (state)
-        print("Get some vehicle attribute values:")
-        print(" GPS: %s" % vehicle.gps_0)
-        print(" Battery: %s" % vehicle.battery)
-        print(" Last Heartbeat: %s" % vehicle.last_heartbeat)
-        print(" Is Armable?: %s" % vehicle.is_armable)
-        print(" System status: %s" % vehicle.system_status.state)
-        print(" Mode: %s" % vehicle.mode.name)
-
-        while not vehicle.is_armable:
-            print("Waiting for vehicle to initialize...")
-            time.sleep(1)
-
-        vehicle.parameters["ARMING_CHECK"] = 0
-        vehicle.mode = VehicleMode("GUIDED")
-        vehicle.armed = True
-
-        self._drone = vehicle
-
-    def takeoff(self, alt):
-        self._drone.simple_takeoff(alt)
-        self._takeoff_alt = alt
-
-    def translate(self, dlat, dlon, dalt):
-        loc = self._drone.location.global_relative_frame
-        lat, lon, alt = loc.lat, loc.lon, loc.alt
-
-        self._drone.simple_goto(
-            LocationGlobalRelative(lat + dlat, lon + dlon, alt + dalt)
-        )
-
-    def goto(self, lat, lon, alt):
-        self._drone.simple_goto(LocationGlobalRelative(lat, lon, alt))
-
-    @property
-    def took_off(self):
-        return self._drone.location.global_relative_frame.alt >= self._takeoff_alt * 0.9
-
-    @property
-    def loc(self):
-        return self._drone.location.global_relative_frame
-
-    def land(self):
-        self._drone.mode = VehicleMode("LAND")
-
-    def close(self):
-        self._drone.close()
-
-def run_drone(connection_string, queue, timeout=30):
-    drone = DronekitDrone(connection_string)
-    drone.connect(timeout)
-    time.sleep(3)
-
-    while True:
-        cmd = queue.get()
-
-        if cmd is None:
-            drone.land()
-            drone.close()
-            break
-        elif cmd == "takeoff":
-            drone.takeoff(20)
-            while not drone.took_off:
-                print("Waiting for drone to finish takeoff...")
-                time.sleep(1)
-        else:
-            drone.translate(*cmd)
 
 def run_suas_code():
-    project_root = "/workspace"
     command = ["uv", "run", "run.py", "--airsim"]
     try:
-        process = subprocess.run(
-            command,
-            cwd=project_root,
-            check=True,
-            text=True,
-            capture_output=False
-        )
+        subprocess.run(command, cwd=PROJECT_ROOT, check=True)
         print("Flight script executed successfully!")
     except subprocess.CalledProcessError as err:
-        print(f"The simulation failed with exit code: {err}")
+        print(f"The flight script failed with exit code {err.returncode}")
     except FileNotFoundError:
         print("Error: 'uv' is not installed")
 
 
 def main():
-    # Initialize Project AirSim Client
     client = ProjectAirSimClient()
 
     try:
         print("Connecting to projectAirSim...")
         client.connect()
-        # Load the world and vehicle defined in your JSONC
-        world = World(client, "scene_ardu_empty.jsonc", delay_after_load_sec=2, sim_config_path="./simulation/sim_config")
 
-        input("Start your sim container now. Press enter to continue (add drones to scene)")
+        # The SITL pulls scene data on startup, so a scene has to exist before it starts,
+        # but a drone that spawns before its SITL is running softlocks. Loading an empty
+        # scene first breaks that circular wait.
+        World(client, EMPTY_SCENE, delay_after_load_sec=2, sim_config_path=SIM_CONFIG_PATH)
 
-        # SET DRONE GRID HERE
-        drone_grid = (4, 4)
-        processes = []
+        input(
+            f"Empty scene loaded. Make sure the sim container is running with "
+            f"NUM_DRONES={NUM_DRONES}, then press Enter to spawn the drone(s): "
+        )
 
-        world = MultidroneWorld(client, "scene_ardu_quadrotor_template.jsonc", delay_after_load_sec=2,
-                                sim_config_path="./simulation/sim_config", drone_grid=drone_grid)
+        # Clones the scene's single drone into a 1 x NUM_DRONES row, offsetting each copy's
+        # ArduPilot UDP ports by 10 to match sim_vehicle.py --instance.
+        MultidroneWorld(
+            client,
+            DRONE_SCENE,
+            delay_after_load_sec=2,
+            sim_config_path=SIM_CONFIG_PATH,
+            drone_grid=(1, NUM_DRONES),
+        )
 
-        input("Press enter to start connections (may need to wait a while for drones to get ready)")
-        # Create a World object to interact with the sim world and load a scene
-        base_port = 5762
-        drone_count = drone_grid[0] * drone_grid[1]
-        queues = [mp.Queue() for _ in range(drone_count)]
-
-        # start drone processes, assign connection string
-        for port, queue in zip(range(base_port, base_port + 10 * drone_count, 10), queues):
-            proc = mp.Process(target=run_drone, args=(f"tcp:127.0.0.1:{port}", queue, 120))
-            proc.start()
-
-            processes.append(proc)
-
-        for queue in queues:
-            queue.put("takeoff")
-
-        # Execute the flight logic
         run_suas_code()
 
+    except KeyboardInterrupt:
+        print("Interrupted.")
     except Exception as err:
         projectairsim_log().error(f"Exception occurred: {err}", exc_info=True)
     finally:
         client.disconnect()
 
-        for p in processes:
-            p.join()
 
 if __name__ == "__main__":
     main()

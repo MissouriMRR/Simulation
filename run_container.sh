@@ -1,6 +1,8 @@
 #!/usr/bin/bash
 
-compose=podman-compose
+# Set VERBOSE=1 to have podman-compose print each step and podman command as it runs:
+#   VERBOSE=1 ./run_container.sh
+compose="podman-compose${VERBOSE:+ --verbose}"
 oci_cmd=podman
 
 # Prebuilt images published to GitHub Container Registry.
