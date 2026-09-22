@@ -73,9 +73,14 @@ def main():
         # scene first breaks that circular wait.
         World(client, EMPTY_SCENE, delay_after_load_sec=2, sim_config_path=SIM_CONFIG_PATH)
 
+        # Restart the SITL for every run. Each spawn restarts the sim clock at 0, and a SITL
+        # already fed by an earlier drone waits for sim time to climb back to where that drone
+        # left off before its flight code runs again, so dronekit sees no heartbeat for as long
+        # as the previous drone was up.
         input(
-            f"Empty scene loaded. Make sure the sim container is running with "
-            f"NUM_DRONES={NUM_DRONES}, then press Enter to spawn the drone(s): "
+            f"Empty scene loaded. Restart the sim container now so the SITL is fresh "
+            f"(NUM_DRONES={NUM_DRONES}), wait for it to finish booting, then press Enter to "
+            f"spawn the drone(s): "
         )
 
         # Clones the scene's single drone into a 1 x NUM_DRONES row, offsetting each copy's

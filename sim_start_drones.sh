@@ -60,6 +60,7 @@ for ((i = 0; i < NCOPTERS; i++)); do
             --instance $i \
             --auto-sysid \
             --sim-address=$AIRSIM_HOST \
+            --no-extra-ports \
             --out=$OUT_HOST:$INSTANCE_OUT_PORT" Enter
 
     # Wait until this instance finishes building before starting the next. Concurrent waf
